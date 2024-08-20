@@ -15,6 +15,7 @@ import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.util.backoff.BackOff;
 import org.springframework.util.backoff.FixedBackOff;
 
 import java.util.HashMap;
@@ -25,44 +26,23 @@ import java.util.Map;
 @Slf4j
 public class LibraryEventsConsumerConfig {
 
-    private final KafkaProperties properties;
-
-    public LibraryEventsConsumerConfig(KafkaProperties properties) {
-        this.properties = properties;
-    }
+    @Bean
     public DefaultErrorHandler errorHandler() {
-
-        var fixedBackOff = new FixedBackOff(1000L, 2L);
-
-        var defaultErrorHandler = new DefaultErrorHandler(fixedBackOff);
-        defaultErrorHandler
-                .setRetryListeners((record, ex, deliveryAttempt) -> {
-            log.info("Failed record in retry listener with attempt {}",deliveryAttempt);
-
-        });
-
-        return defaultErrorHandler;
+        BackOff fixedBackOff = new FixedBackOff(1000L, 2);
+        return new DefaultErrorHandler((consumerRecord, exception) -> {
+        }, fixedBackOff);
     }
 
-    @Bean
-    public ConsumerFactory<Object, Object> consumerFactory() {
-        return new DefaultKafkaConsumerFactory<>(consumerConfigs());
-    }
+
 
     @Bean
-    public Map<Object, Object> consumerConfigs() {
-        return  new HashMap<>();
-    }
-
-    @Bean
-    ConcurrentKafkaListenerContainerFactory<?, ?> kafkaListenerContainerFactory(
+    public ConcurrentKafkaListenerContainerFactory<?, ?> kafkaListenerContainerFactory(
             ConcurrentKafkaListenerContainerFactoryConfigurer configurer,
-            ObjectProvider<ConsumerFactory<Object, Object>> kafkaConsumerFactory,
-            ObjectProvider<ContainerCustomizer<Object, Object, ConcurrentMessageListenerContainer<Object, Object>>> kafkaContainerCustomizer) {
+            ConsumerFactory<Object, Object> kafkaConsumerFactory) {
         ConcurrentKafkaListenerContainerFactory<Object, Object> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory());
+        configurer.configure(factory,kafkaConsumerFactory);
         factory.setConcurrency(3);
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
+       // factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
         factory.setCommonErrorHandler(errorHandler());
         return factory;
     }
