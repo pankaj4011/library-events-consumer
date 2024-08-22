@@ -34,9 +34,12 @@ import org.springframework.test.context.TestPropertySource;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.isA;
 import static org.mockito.Mockito.*;
@@ -44,7 +47,8 @@ import static org.mockito.Mockito.*;
 @SpringBootTest
 @EmbeddedKafka(topics = {"library_events", "library-events.RETRY","library-events.DLT"}, partitions = 3)
 @TestPropertySource(properties = {"spring.kafka.producer.bootstrap-servers=${spring.embedded.kafka.brokers}",
-        "spring.kafka.consumer.bootstrap-servers=${spring.embedded.kafka.brokers}"})
+        "spring.kafka.consumer.bootstrap-servers=${spring.embedded.kafka.brokers}",
+"retryListener.startup=false"})
 public class LibraryEventsConsumerTest {
 
     private static final Logger log = LoggerFactory.getLogger(LibraryEventsConsumerTest.class);
@@ -80,9 +84,20 @@ public class LibraryEventsConsumerTest {
 
     @BeforeEach
     void setup(){
+       var container = kafkaListenerEndpointRegistry.getListenerContainers()
+                .stream()
+                .filter(messageListenerContainer ->
+                    Objects.equals(messageListenerContainer.getGroupId(), "library-events-listener-group")
+                )
+               .toList().getFirst();
+       ContainerTestUtils.waitForAssignment(container,embeddedKafkaBroker.getPartitionsPerTopic());
+
+        /*
         for(MessageListenerContainer messageListenerContainer : kafkaListenerEndpointRegistry.getListenerContainers()){
             ContainerTestUtils.waitForAssignment(messageListenerContainer,embeddedKafkaBroker.getPartitionsPerTopic());
         }
+
+         */
     }
 
     @AfterEach
@@ -149,8 +164,18 @@ public class LibraryEventsConsumerTest {
         CountDownLatch latch = new CountDownLatch(1);
         latch.await(5, TimeUnit.SECONDS);
 
-        verify(libraryEventsConsumer,times(3)).onMessage(isA(ConsumerRecord.class));
-        verify(libraryEventsService, times(3)).processLibraryEvent(isA(ConsumerRecord.class));
+        verify(libraryEventsConsumer,times(1)).onMessage(isA(ConsumerRecord.class));
+        verify(libraryEventsService, times(1)).processLibraryEvent(isA(ConsumerRecord.class));
+
+        Map<String, Object> configs = new HashMap<>(KafkaTestUtils.consumerProps("group2", "true", embeddedKafkaBroker));
+        configs.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,"latest");
+        consumer = new DefaultKafkaConsumerFactory<Integer,String>(configs,new IntegerDeserializer(),new StringDeserializer()).createConsumer();
+        embeddedKafkaBroker.consumeFromAnEmbeddedTopic(consumer,deadTopic);
+
+        ConsumerRecord<Integer,String> consumerRecord = KafkaTestUtils.getSingleRecord(consumer,deadTopic);
+        log.info("Consumer record {}",consumerRecord.value());
+        assertEquals(json, consumerRecord.value())
+        ;
 
     }
 
@@ -164,14 +189,19 @@ public class LibraryEventsConsumerTest {
         CountDownLatch latch = new CountDownLatch(1);
         latch.await(5, TimeUnit.SECONDS);
 
-        verify(libraryEventsConsumer,atLeast(3)).onMessage(isA(ConsumerRecord.class));
-        verify(libraryEventsService, atLeast(3)).processLibraryEvent(isA(ConsumerRecord.class));
+
+        verify(libraryEventsConsumer,times(3)).onMessage(isA(ConsumerRecord.class));
+        verify(libraryEventsService, times(3)).processLibraryEvent(isA(ConsumerRecord.class));
+
+        //verify(libraryEventsConsumer,atLeast(3)).onMessage(isA(ConsumerRecord.class));
+        //verify(libraryEventsService, atLeast(3)).processLibraryEvent(isA(ConsumerRecord.class));
 
 
         Map<String, Object> configs = new HashMap<>(KafkaTestUtils.consumerProps("group1", "true", embeddedKafkaBroker));
         configs.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,"latest");
         consumer = new DefaultKafkaConsumerFactory<Integer,String>(configs,new IntegerDeserializer(),new StringDeserializer()).createConsumer();
         embeddedKafkaBroker.consumeFromAnEmbeddedTopic(consumer,retryTopic);
+
         ConsumerRecord<Integer,String> consumerRecord = KafkaTestUtils.getSingleRecord(consumer,retryTopic);
         log.info("Consumer record {}",consumerRecord.value());
         assertEquals(json, consumerRecord.value());

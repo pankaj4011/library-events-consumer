@@ -41,7 +41,7 @@ public class LibraryEventsConsumerConfig {
     private String retryTopic;
 
 
-    @Value("${topics.retry}")
+    @Value("${topics.dlt}")
     private String deadTopic;
 
 
@@ -55,6 +55,7 @@ public class LibraryEventsConsumerConfig {
                         return new TopicPartition(retryTopic, r.partition());
                     }
                     else {
+                        log.info("Publishing record to dead letter topic");
                         return new TopicPartition(deadTopic, r.partition());
                     }
                 });
@@ -78,7 +79,8 @@ public class LibraryEventsConsumerConfig {
                 exponentialBackoff);
 
         ignoreExceptionList.forEach(errorHandler::addNotRetryableExceptions);
-        errorHandler
+
+         errorHandler
                 .setRetryListeners((record, ex, deliveryAttempt) -> {
                     log.info("Failed record in retry listener, exception {}, deliveryAttempt {}",ex.getMessage(),deliveryAttempt);
                 });

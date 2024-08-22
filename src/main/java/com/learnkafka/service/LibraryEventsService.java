@@ -25,7 +25,7 @@ public class LibraryEventsService {
     public void processLibraryEvent(ConsumerRecord<Integer,String> consumerRecord) throws JsonProcessingException {
       LibraryEvent libraryEvent = objectMapper.readValue(consumerRecord.value(), LibraryEvent.class);
       log.info("libraryEvent {}",libraryEvent);
-      if(libraryEvent!=null && libraryEvent.getLibraryEventId() == 999 )
+      if(libraryEvent!=null && (libraryEvent.getLibraryEventId()!=null && libraryEvent.getLibraryEventId() == 999) )
       {
           throw new RecoverableDataAccessException("Temporary network issue");
       }
