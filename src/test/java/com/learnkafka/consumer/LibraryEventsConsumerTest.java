@@ -3,8 +3,10 @@ package com.learnkafka.consumer;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.learnkafka.entity.Book;
+import com.learnkafka.entity.FailureRecord;
 import com.learnkafka.entity.LibraryEvent;
 import com.learnkafka.entity.LibraryEventType;
+import com.learnkafka.jpa.FailureRecordRepository;
 import com.learnkafka.jpa.LibraryEventsRepository;
 import com.learnkafka.service.LibraryEventsService;
 import org.apache.kafka.clients.consumer.Consumer;
@@ -19,6 +21,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.diagnostics.FailureAnalysisReporter;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
@@ -80,6 +83,10 @@ public class LibraryEventsConsumerTest {
     private String deadTopic;
 
     private Consumer<Integer, String> consumer;
+
+    @Autowired
+    private FailureRecordRepository failureRecordRepository;
+
 
 
     @BeforeEach
@@ -207,4 +214,27 @@ public class LibraryEventsConsumerTest {
         assertEquals(json, consumerRecord.value());
 
     }
+
+    @Test
+    void publishUpdateLibraryEvent_null_EventId_failureRecord() throws InterruptedException, ExecutionException, JsonProcessingException {
+
+        String json = "{\"libraryEventId\":null,\"libraryEventType\":\"UPDATE\",\"book\":{\"bookId\":456,\"bookName\":\"Kafka Using Spring Boot\",\"bookAuthor\":\"Dilip\"}}";
+
+        kafkaTemplate.sendDefault(json).get();
+
+        CountDownLatch latch = new CountDownLatch(1);
+        latch.await(5, TimeUnit.SECONDS);
+
+        verify(libraryEventsConsumer,times(1)).onMessage(isA(ConsumerRecord.class));
+        verify(libraryEventsService, times(1)).processLibraryEvent(isA(ConsumerRecord.class));
+
+        var count = failureRecordRepository.count();
+        assertEquals(1,count);
+        failureRecordRepository.findAll()
+                .forEach(failureRecord -> {
+                    log.info("Failure record {}",failureRecord);
+                });
+
+    }
+
 }

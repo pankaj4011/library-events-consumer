@@ -1,8 +1,10 @@
 package com.learnkafka.config;
 
+import com.learnkafka.service.FailureEventService;
 import lombok.extern.slf4j.Slf4j;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.utils.ExponentialBackoff;
 import org.springframework.beans.factory.ObjectProvider;
@@ -34,8 +36,15 @@ import java.util.Map;
 @Slf4j
 public class LibraryEventsConsumerConfig {
 
+    public static final String RETRY ="RETRY";
+    public static final String DEAD ="DEAD";
+    public static final String SUCCESS = "SUCCESS";
+
     @Autowired
     KafkaTemplate kafkaTemplate;
+
+    @Autowired
+    FailureEventService failureEventService;
 
     @Value("${topics.retry}")
     private String retryTopic;
@@ -61,6 +70,17 @@ public class LibraryEventsConsumerConfig {
                 });
         return recoverer;
     }
+    ConsumerRecordRecoverer consumerRecordRecoverer = (consumerRecord,exception)->{
+        var record = (ConsumerRecord<Integer,String>)consumerRecord;
+        if (exception.getCause() instanceof RecoverableDataAccessException) {
+            log.error("Inside the Recoverable exception block");
+            failureEventService.saveRecord(record,exception,RETRY);
+        }
+        else {
+            log.info("Inside the Non-Recoverable exception block");
+            failureEventService.saveRecord(record,exception,DEAD);
+        }
+    };
 
     @Bean
     public DefaultErrorHandler errorHandler() {
@@ -74,8 +94,9 @@ public class LibraryEventsConsumerConfig {
         var ignoreExceptionList = List.of(IllegalArgumentException.class);
 
         var errorHandler = new DefaultErrorHandler(
-                deadLetterPublishingRecoverer(),
+             //   deadLetterPublishingRecoverer(),
                 //fixedBackOff
+                consumerRecordRecoverer,
                 exponentialBackoff);
 
         ignoreExceptionList.forEach(errorHandler::addNotRetryableExceptions);
@@ -86,6 +107,7 @@ public class LibraryEventsConsumerConfig {
                 });
         return errorHandler;
     }
+
 
 
     @Bean
